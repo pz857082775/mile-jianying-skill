@@ -1,0 +1,39 @@
+[project]
+name = "mile-jianying-skill"
+version = "1.0.0"
+description = "米乐-自动剪映视频：面向剪映专业版的自然语言自动剪辑与精准片段编辑 Skill"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "米乐" }]
+keywords = ["jianying", "video-editing", "automation", "agent-skill", "draft"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+]
+
+[project.optional-dependencies]
+media = ["pymediainfo>=6.0"]
+recording = ["uiautomation", "pynput", "numpy", "psutil"]
+audio-analysis = ["numpy>=2.0"]
+asr = ["faster-whisper>=1.0"]
+web = ["playwright", "websockets", "requests"]
+dev = ["pytest>=7.0"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/vendor/**" = ["ALL"]
+"assets/**" = ["ALL"]

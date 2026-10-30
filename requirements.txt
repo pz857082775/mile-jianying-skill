@@ -1,0 +1,22 @@
+# 米乐-自动剪映视频 依赖
+# 基础剪辑（草稿读写、精准编辑、记忆、组装）仅需 Python 标准库。
+# 以下为可选能力依赖，按需安装；缺失时相关功能会给出明确错误码而不是崩溃。
+
+# 自动导出 / GUI 自动化（Windows）
+uiautomation==2.0.20; sys_platform == "win32"
+
+# 录屏与智能变焦
+pynput==1.7.7
+numpy>=2.0.0
+psutil>=5.9.0
+
+# Web 动效转视频
+playwright==1.52.0
+requests>=2.31.0
+websockets>=12.0
+
+# 媒体时长探测（可选；缺失时回退 ffprobe）
+pymediainfo==7.0.1
+
+# 语音转字幕（可选 ASR 后端；缺失时 smart/subtitles 返回 ASR_UNAVAILABLE 而不是崩溃）
+# faster-whisper>=1.0.0

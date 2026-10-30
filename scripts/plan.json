@@ -1,0 +1,1 @@
+{"intent": "收紧节奏并统一字幕", "tags": ["快节奏", "字幕"], "ops": [{"op": "trim", "target": {"ref": "SEGV1"}, "end": "2.5s", "ripple": true}, {"op": "add_transition", "target": {"ref": "SEGV1"}, "type": "叠化", "duration": "0.4s"}, {"op": "set_volume", "target": {"role": "bgm"}, "volume": "20%"}, {"op": "set_text", "target": {"text_contains": "第二句"}, "text": "第二句改好了"}]}
