@@ -258,6 +258,73 @@ Clause separators: `，` `。` `；` `！` `？` and `然后` / `接着` / `随�
   (rewriting the shared material would silently change other captions); splits clone the style
   into independent segments. Any failure rolls back the in-memory draft.
 
+## v1.1 Layer (`mile.preview` / `mile.profile` / `mile.variants` / `mile.memory` governance)
+
+### Preview (`mile.preview`)
+
+- `preview_plan(data, plan) -> dict` — runs the plan on an **in-memory copy** (same
+  execution path as `apply_plan` via `plan._execute_ops`) and returns a structured
+  before/after diff. Never writes to disk, never records memory.
+  Returns `{draft, preview: True, saved: False, intent, tags, before, after,
+  diff: {meta, segments, ops}, risks, warnings}`.
+- Segment diff is keyed by segment `id` with three states: `added` / `removed` /
+  `changed` (the latter lists changed `fields` plus before/after values; times are in
+  seconds).
+- `risks` reuses `quality.run_checks` on the previewed in-memory draft and keeps only
+  `error`-level issues.
+- CLI: `mile_cli.py plan "<draft>" --plan plan.json --preview` and
+  `mile_cli.py apply "<draft>" --plan plan.json --preview` (apply + preview never saves).
+
+### Style Profiles (`mile.profile`)
+
+Named, versioned style bundles (caption font size/color/position, transitions, BGM
+volume, shot pace, canvas). Stored in `MILE_MEMORY_DIR/profiles/` (or `MILE_PROFILE_DIR`).
+
+- `create_profile(name, *, draft_path=None, style=None, tags=None, notes=None, force=False) -> dict`
+  — extracts style from a reference draft (`memory.extract_style`) or takes explicit JSON.
+  Duplicate names raise `PROFILE_EXISTS` unless `force=True` (version auto-bumps, old
+  version backed up under `profiles/versions/`).
+- `list_profiles() -> list[dict]` / `get_profile(name) -> dict` (raises
+  `PROFILE_NOT_FOUND`) / `resolve_style(name) -> dict` (style only, for `assemble --style`).
+- `update_profile(name, *, style=None, tags=None, notes=None, draft_path=None) -> dict` —
+  style updates are **deep-merged** (nested keys like `caption.color` merge, not replace).
+- `delete_profile(name) -> dict` / `export_profile(name, out) -> dict` /
+  `import_profile(source, *, force=False) -> dict`.
+- CLI: `mile_cli.py profile --action create|list|show|update|delete|export|import`.
+
+### Memory Governance (`mile.memory`)
+
+- `export_memory(out, *, project=None, since=None) -> dict` — exports a JSON package
+  `{kind: "mile-memory", version, exported_at, count, records[]}`; filters by project or
+  since-date; atomic write; raises `EXPORT_FAILED` on failure.
+- `import_memory(source, *, mode="merge"|"replace", overwrite=False) -> dict` — validates
+  the whole file first (`IMPORT_BAD_FORMAT` on malformed input, 100 MB cap); `merge` de-dupes
+  by id (skip by default, `overwrite=True` updates); `replace` wipes then imports and backs
+  up the old library first. Returns `{mode, added, updated, skipped, backup}`.
+- Negative feedback learning: `recommend_style` now multiplies score by `0.5` for
+  `outcome="rejected"` records and `1.1` for `outcome="accepted"` (on top of rating-based
+  adjustment).
+- CLI: `mile_cli.py memory --action export --out mem.json [--project X --since Y]` /
+  `import --source mem.json [--mode merge|replace --overwrite]`.
+
+### Variants (`mile.variants`)
+
+Matrix-account / multi-platform / A-B test batcher.
+
+- `variants(project, clips, *, root=None, width, height, fps, count=3, names=None,
+  openings=None, transitions=None, bgms=None, ratios=None, captions=None, bgm_volume,
+  clip_duration=None, transition_duration=None, style=None, remember=True, intent, tags,
+  notes, force=False, dry_run=False) -> dict`
+  — deterministically cycles parameter pools to produce `{project}_v1.._vN` independent
+  drafts, each QA-checked and remembered with `variant_of:<project>` / `variant_index:<N>` tags.
+  - Ratios accept `16:9 / 9:16 / 1:1 / 4:5 / 3:4 / 21:9` or explicit `WxH`.
+  - Without explicit `names`, at least one pool must contain ≥2 options, otherwise
+    `BAD_ARGS` (guarantees structural difference between variants).
+  - Single-item failures are collected in `failures` and do not abort others; all-fail
+    raises `VARIANTS_FAILED`.
+  - Returns `{project, requested, created, failed, items[], failures[], dry_run}`.
+- CLI: `mile_cli.py variants --project <name> 素材... [--count N --openings ... --transitions ... --bgms ... --ratios ... --projects ...]`.
+
 ## CLI Contract
 
 Common `--json` output:

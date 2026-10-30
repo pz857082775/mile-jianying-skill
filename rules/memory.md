@@ -46,6 +46,7 @@ python <SKILL_ROOT>/scripts/mile_cli.py memory --action recall \
 - 有文本需求时：`0.40×文本 + 0.25×结构 + 0.15×风格 + 0.20×时效`
 - 仅给参考草稿时：`0.45×结构 + 0.25×风格 + 0.30×时效`
 - 历史评分会带来 ±0.05 的修正，正向反馈优先。
+- **负反馈降权（1.1.0）**：`outcome=rejected` 的记录总分 ×0.5；`outcome=accepted` 的记录总分 ×1.1。被拒绝过的风格会在召回中明显下沉。
 
 返回的 `style` 是把 Top-K 记忆合并后的可直接使用风格档案；`advice` 给出可读建议。
 
@@ -91,3 +92,48 @@ python <SKILL_ROOT>/scripts/mile_cli.py memory --action list --limit 20 --tag �
 - **不记录敏感信息**：`--notes` 不要写用户隐私或密钥。
 - **结果导向**：只有用户确认满意后才给高分；失败案例保留并标注 `outcome`，同样有参考价值。
 - **单次关闭**：批量实验或测试时加 `--no-remember`，避免污染长期记忆。
+
+## 6. 记忆迁移与治理（1.1.0）
+
+```bash
+# 全量导出 / 按项目导出 / 按时间导出（换机迁移或备份）
+python <SKILL_ROOT>/scripts/mile_cli.py memory --action export --out memories.json
+python <SKILL_ROOT>/scripts/mile_cli.py memory --action export --out tech.json --project 科技
+python <SKILL_ROOT>/scripts/mile_cli.py memory --action export --out this-year.json --since 2026-01-01
+
+# 导入（默认 merge 按 id 去重；--overwrite 更新已存在的；--mode replace 清空后导入并自动备份原库）
+python <SKILL_ROOT>/scripts/mile_cli.py memory --action import --source memories.json
+python <SKILL_ROOT>/scripts/mile_cli.py memory --action import --source memories.json --mode replace
+```
+
+规则：
+
+- 导入文件必须先通过格式校验（`kind: mile-memory`，100MB 上限），损坏文件报 `IMPORT_BAD_FORMAT` 且**不污染现有记忆库**。
+- `replace` 模式导入前自动把原库备份为 `sessions.backup-<时间>.jsonl`。
+- 导出内容包含记忆原文（intent/notes 等），注意不要在公开链路里传播敏感项目。
+
+## 7. 系列风格档案（1.1.0）
+
+把「记忆里的常用风格」固化成**可命名的档案**，一个账号/栏目一套，供 `assemble` 直接套用，比自动召回更稳定可控：
+
+```bash
+# 从参考草稿提取风格，建立「科技评论」档案
+python <SKILL_ROOT>/scripts/mile_cli.py profile --action create --name 科技评论 --draft "上周那期"
+
+# 列表 / 查看 / 更新 / 删除
+python <SKILL_ROOT>/scripts/mile_cli.py profile --action list
+python <SKILL_ROOT>/scripts/mile_cli.py profile --action show --name 科技评论
+python <SKILL_ROOT>/scripts/mile_cli.py profile --action update --name 科技评论 --tags "科技,栏目" --notes "品牌标准"
+python <SKILL_ROOT>/scripts/mile_cli.py profile --action delete --name 科技评论
+
+# 导出 / 导入（团队共享、换机迁移）
+python <SKILL_ROOT>/scripts/mile_cli.py profile --action export --name 科技评论 --out profile.json
+python <SKILL_ROOT>/scripts/mile_cli.py profile --action import --source profile.json
+```
+
+规则：
+
+- **档案优先级**：`assemble --style <档案JSON/内联>` > `profile 档案中的风格` > 记忆自动召回 > 默认。显式指定的档案不会被自动召回覆盖。
+- 同名创建默认拒绝（`PROFILE_EXISTS`）；`--force` 覆盖时版本号自增，旧版自动备份到 `profiles/versions/`。
+- 档案风格可手动更新（深合并：只改你想改的字段，其他保留），也可从新草稿重新提取。
+- 档案文件是本地明文 JSON（`MILE_MEMORY_DIR/profiles/`），导出时注意敏感样式信息与字体版权标注。

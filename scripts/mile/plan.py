@@ -526,33 +526,22 @@ def _apply_one(data: dict, entry: dict):
     raise MileError("UNSUPPORTED_OP", f"未实现的操作: {op_name}")
 
 
-def apply_plan(draft: Draft, plan, *, dry_run: bool = False, backup: bool = True) -> dict:
-    """校验并应用计划。失败时回滚内存修改，磁盘上不会留下半套结果。"""
-    compiled = compile_plan(draft.data, plan)
-    if dry_run:
-        compiled["dry_run"] = True
-        compiled["preview"] = [
-            {"op": entry["op"], "targets": entry["target_detail"], "args": entry["args"]}
-            for entry in compiled["operations"]
-        ]
-        return compiled
+def _execute_ops(data: dict, compiled: dict) -> tuple[list[dict], list[str]]:
+    """在内存 dict ``data`` 上按顺序执行编译后的操作；任一失败整体回滚数据并抛错。
 
-    timeline = build_timeline(draft.data)
-    before = {
-        "duration": int(draft.data.get("duration") or 0),
-        "segments": len(timeline.get("segments") or []),
-        "tracks": len(timeline.get("tracks") or []),
-    }
-    snapshot = copy.deepcopy(draft.data)
+    与 ``apply_plan`` 共用同一执行路径：preview / dry-run 与真实落盘的结果
+    保证字段级一致。不写磁盘、不触发备份。
+    """
+    snapshot = copy.deepcopy(data)
     applied = []
     warnings = list(compiled.get("warnings") or [])
 
     for entry in compiled["operations"]:
         try:
-            result = _apply_one(draft.data, entry)
+            result = _apply_one(data, entry)
         except Exception as exc:
-            draft.data.clear()
-            draft.data.update(snapshot)
+            data.clear()
+            data.update(snapshot)
             if isinstance(exc, MileError):
                 raise MileError(
                     exc.code,
@@ -576,7 +565,30 @@ def apply_plan(draft: Draft, plan, *, dry_run: bool = False, backup: bool = True
         if isinstance(result, dict) and result.get("warning"):
             warnings.append(f"{entry['op']}#{entry['index'] + 1}: {result['warning']}")
 
-    refresh_duration(draft.data)
+    refresh_duration(data)
+    return applied, warnings
+
+
+def apply_plan(draft: Draft, plan, *, dry_run: bool = False, backup: bool = True) -> dict:
+    """校验并应用计划。失败时回滚内存修改，磁盘上不会留下半套结果。"""
+    compiled = compile_plan(draft.data, plan)
+    if dry_run:
+        compiled["dry_run"] = True
+        compiled["preview"] = [
+            {"op": entry["op"], "targets": entry["target_detail"], "args": entry["args"]}
+            for entry in compiled["operations"]
+        ]
+        return compiled
+
+    timeline = build_timeline(draft.data)
+    before = {
+        "duration": int(draft.data.get("duration") or 0),
+        "segments": len(timeline.get("segments") or []),
+        "tracks": len(timeline.get("tracks") or []),
+    }
+
+    applied, warnings = _execute_ops(draft.data, compiled)
+
     timeline_after = build_timeline(draft.data)
     saved_path = draft.save(backup=backup)
     after = {

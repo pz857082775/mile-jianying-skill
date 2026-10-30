@@ -1,5 +1,46 @@
 # 变更记录
 
+## 1.1.0 (2026-10-30) — 米乐
+
+功能完善轮：**先看后改（差异预览）、风格档案化、记忆可迁移、批量变体**。全部新能力仅用 Python 标准库，零新增必装依赖；现有 237 项测试零回归，新增 24 项测试全部通过（全量 261 项；4 error + 1 failure + 1 skip 为第三方依赖缺失的既有基线）。
+
+### 计划差异预览 `scripts/mile/preview.py`（新）
+
+- **新模块** `preview_plan(data, plan)`：在**内存副本**上完整执行计划，输出修改前后结构化对比（meta 差异、片段级 added/removed/changed 三态 diff、操作明细、风险提示），全程不写磁盘、不改草稿、不写记忆。
+- **同一执行路径保证**：`plan.py` 抽出 `_execute_ops(data, compiled)` 供 `apply_plan` 与 `preview_plan` 共用，preview 的 after 与实际 apply 后结果字段级一致（单测断言）。
+- **CLI**：`plan --preview` / `apply --preview` 输出 `{before, after, diff:{meta,segments,ops}, risks, warnings}`；`apply --preview` 只预览不落盘，也不写记忆。
+- **风险提示**：对预览后的内存草稿复用 `qa` 规则取 error 级问题作为 risks。
+
+### 系列风格档案 `scripts/mile/profile.py`（新）
+
+- **档案生命周期**：`create / list / show / update / delete / export / import`，存于 `MILE_MEMORY_DIR/profiles/`（可用 `MILE_PROFILE_DIR` 单独指定）。
+- **创建方式**：从参考草稿自动提取风格（复用 `memory.extract_style`），或显式传 style JSON；`source_draft` 记录来源。
+- **版本管理**：同名创建默认拒绝（`PROFILE_EXISTS`），`force=True` 覆盖时版本号自增，旧版自动备份到 `profiles/versions/`。
+- **深合并**：`update_profile` 的 style 更新为递归深合并，子结构（如 caption）不会被整体覆盖。
+- **文件名安全**：档案名统一 `_slug` 清洗（保留中文/字母/数字/`-_`），避免非法路径。
+- **CLI**：`profile --action create|list|show|update|delete|export|import`。
+
+### 记忆治理与负反馈 `scripts/mile/memory.py`（增强）
+
+- **导出** `export_memory(out, *, project=None, since=None)`：导出 JSON 包（`{kind:"mile-memory", version, exported_at, count, records[]}`），支持按项目 / 起始时间过滤；原子写入。
+- **导入** `import_memory(source, *, mode="merge"|"replace", overwrite=False)`：先完整校验再写入（损坏 JSON 报 `IMPORT_BAD_FORMAT` 且不污染原库）；merge 按 id 去重、可 `overwrite` 更新；replace 导入前自动备份原记忆文件；100MB 大小上限。
+- **负反馈学习**：`recommend_style` 召回打分时，`outcome="rejected"` 的记录 ×0.5 降权、`accepted` ×1.1 加权（在既有评分微调之上）。
+- **CLI**：`memory --action export --out ... [--project ... --since ...]`；`memory --action import --source ... [--mode merge|replace --overwrite]`。
+
+### 批量变体 `scripts/mile/variants.py`（新）
+
+- **新模块** `variants(project, clips, *, count, openings, transitions, bgms, ratios, ...)`：参数池（开头素材 / 转场 / BGM / 画布比例）**确定性顺序轮换**生成 `{项目}_v1.._vN` 独立草稿；比例支持 `16:9 / 9:16 / 1:1 / 4:5 / 3:4 / 21:9 / 宽x高`。
+- **差异保证**：无显式 `names` 时要求至少一个参数池含 ≥2 个选项，否则 `BAD_ARGS` 拒绝（避免同质化变体）；相邻变体保证至少一个参数不同。
+- **容错**：单份失败记入 `failures` 继续其他变体；全部失败抛 `VARIANTS_FAILED`；命名冲突自动避让（`_vN` 后缀递增）。
+- **质量与记忆**：每份变体独立 `qa` 自检（结果计入输出）；记忆写入 `variant_of:<项目>` / `variant_index:<N>` 标记，可按项目筛选变体记忆。
+- **CLI**：`variants --project <名> 素材... [--count N --openings ... --transitions ... --bgms ... --ratios ... --projects ...]`。
+
+### 其他
+
+- `plan.py` 内部重构：`apply_plan` 与 `preview_plan` 共用 `_execute_ops`（行为不变，测试全绿）。
+- 新增测试：`tests/test_preview.py`（5 项）、`tests/test_profile_memory.py`（12 项）、`tests/test_variants.py`（7 项）；新增稳定错误码 `PROFILE_NOT_FOUND / PROFILE_EXISTS / PROFILE_CORRUPT / IMPORT_BAD_FORMAT / EXPORT_FAILED / VARIANTS_FAILED`。
+- 文档：`docs/dev-requirement-v1.1.md`（本轮策划开发需求文档）、README/SKILL 新命令、`rules/memory.md` 档案与治理说明。
+
 ## 1.0.0 (2026-10-29) — 米乐
 
 首个版本，处于开发阶段。基于上游基线完成二次开发，并经真实剪映 5.9.0.11632 端到端验证。

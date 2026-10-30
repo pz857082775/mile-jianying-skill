@@ -1,6 +1,6 @@
 [project]
 name = "mile-jianying-skill"
-version = "1.0.0"
+version = "1.1.0"
 description = "米乐-自动剪映视频：面向剪映专业版的自然语言自动剪辑与精准片段编辑 Skill"
 readme = "README.md"
 requires-python = ">=3.9"

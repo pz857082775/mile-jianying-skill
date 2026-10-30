@@ -1,4 +1,4 @@
-# 米乐-自动剪映视频 (mile-jianying-skill) v1.0.0
+# 米乐-自动剪映视频 (mile-jianying-skill) v1.1.0
 
 **用自然语言完成剪映专业版自动剪辑，并能对任意片段下达精准优化指令。**
 
@@ -9,17 +9,21 @@
 | 能力 | 说明 | 入口 |
 |------|------|------|
 | 自然语言智能剪辑 | 中文指令直接解析成结构化计划（默认只预览，`--apply` 才落盘），并给出置信度、澄清项与质检结论 | `mile_cli.py smart` |
+| **修改前差异预览** | 计划在内存副本执行后输出 before/after 结构对比（片段级 diff + 风险提示），不落盘 | `mile_cli.py plan --preview` / `apply --preview` |
+| **系列风格档案** | 一个账号/栏目一套风格（字号/颜色/字幕位置/转场/BGM/节奏），可命名、版本化、导出/导入、`assemble --profile` 一键套用 | `mile_cli.py profile` |
+| **记忆迁移与负反馈** | 记忆支持导出/导入（换机迁移）；被拒绝的修改在召回中自动降权 | `mile_cli.py memory --action export/import` |
+| **批量变体** | 一条底稿按参数池（开头/转场/BGM/比例）顺序轮换生成 N 份差异草稿，每份独立质检与记忆 | `mile_cli.py variants` |
 | 字幕智能整理 | 错别字纠正、术语保护、标点归一、按长度断句、时长重分配、SRT 往返 | `mile_cli.py subtitles` |
 | BGM / 转场推荐 | 音频节奏与能量分析 + 云端曲库元数据排序 + 按时长/空隙的转场建议 | `mile_cli.py recommend` |
-| 证据分析与剪辑决策 | 只读：媒体信号（黑帧/静帧/音频节奏/镜头边界，装了 PySceneDetect 优先、否则降级 ffmpeg scene 分数；LUFS 响度由 ffmpeg ebur128 实测）+ 可解释的风格/节奏/转场/响度决策与候选计划 | `mile_cli.py analyze` / `decide` |
-| 精准片段编辑 | 按 ref / 轨道 / 时间 / 文字 / 角色定位片段，裁剪、分割、变速、调音量、改字幕、加转场、滤镜、特效、蒙版、视频动画、字幕动画、关键帧（缩放等），只动目标片段 | `mile_cli.py edit` / `find` |
-| 素材入轨 | 视频/图片素材加入草稿：追加主轨或指定时间点，支持画中画/贴纸覆盖轨（`flag=2`）与源区间裁剪 | `mile_cli.py smart "把 b.mp4 加到第3秒"` / `edit --op add_media` |
+| 证据分析与剪辑决策 | 只读：媒体信号（黑帧/静帧/音频节奏/镜头边界）+ 可解释的风格/节奏/转场/响度决策 | `mile_cli.py analyze` / `decide` |
+| 精准片段编辑 | 按 ref / 轨道 / 时间 / 文字 / 角色定位片段，裁剪、分割、变速、调音量、改字幕、加转场、滤镜、特效、蒙版、动画、关键帧 | `mile_cli.py edit` / `find` |
+| 素材入轨 | 视频/图片素材加入草稿：追加主轨或指定时间点，支持画中画/贴纸覆盖轨 | `mile_cli.py smart` / `edit --op add_media` |
 | 结构化剪辑计划 | 一次提交多步操作，全部校验通过才保存；任一失败整体回滚 | `mile_cli.py plan` / `apply` |
 | 剪辑记忆 | 每次剪辑自动记录需求、操作、风格与结构摘要；同类视频自动召回并推荐风格 | `mile_cli.py memory` |
 | 质量检查 | 检查空片段、越界、轨道冲突、字幕错位、音量异常等，并可安全自动修复 | `mile_cli.py qa --fix` |
 | 智能组装 | 给定素材、字幕、BGM，按历史风格一键生成完整草稿 | `mile_cli.py assemble` |
-| 批量/无头导出 | 调用剪映完成 MP4/SRT 导出，自动定位并校验真实成片，返回实际文件路径 | `mile_cli.py export` / `srt` |
-| 安全兜底 | 每次保存自动备份，支持 `undo`、`backups`，不破坏剪映未知字段 | `mile_cli.py undo` / `backups` |
+| 批量/无头导出 | 调用剪映完成 MP4/SRT 导出，自动定位并校验真实成片 | `mile_cli.py export` / `srt` |
+| 安全兜底 | 每次保存自动备份，支持 `undo`、`backups` | `mile_cli.py undo` / `backups` |
 
 传统能力完整保留：素材导入、AI 配音、字幕对齐、云端曲库、特效/转场/滤镜搜索、录屏与智能变焦、Web 动效转视频、影视解说生成。
 
@@ -112,6 +116,66 @@ python scripts/mile_cli.py memory --action forget --id <记忆id>
 
 `apply` / `edit` / `assemble` 默认写入记忆；加 `--no-remember` 可关闭单次记录。
 
+### 修改前差异预览（1.1.0）
+
+对任意计划先看后改：内存副本执行 + 片段级 diff，不落盘、不改草稿：
+
+```bash
+python scripts/mile_cli.py plan  "我的项目" --plan plan.json --preview   # 输出 before/after/diff/risks
+python scripts/mile_cli.py apply "我的项目" --plan plan.json --preview   # 等价：只预览，不落盘
+```
+
+### 系列风格档案（1.1.0）
+
+```bash
+# 从参考草稿提取风格，建立命名档案
+python scripts/mile_cli.py profile --action create --name 科技评论 --draft "上周那期"
+
+# 查看 / 列表 / 更新 / 删除
+python scripts/mile_cli.py profile --action list
+python scripts/mile_cli.py profile --action show --name 科技评论
+python scripts/mile_cli.py profile --action update --name 科技评论 --tags "科技,栏目" --notes "品牌标准"
+python scripts/mile_cli.py profile --action delete --name 科技评论
+
+# 迁移 / 共享
+python scripts/mile_cli.py profile --action export --name 科技评论 --out profile.json
+python scripts/mile_cli.py profile --action import --source profile.json   # 同名需 --force
+
+# 组装草稿时一键套用档案（优先级：--style > --profile > 记忆自动召回 > 默认）
+python scripts/mile_cli.py assemble 素材.mp4 --project "新一期" --captions captions.srt --bgm bgm.mp3 --style-from "上周那期"
+```
+
+> `assemble --style 档案名.json` 可直接引用导出的档案文件；`profile` 档案中的风格也可覆盖 `--style-from` 的自动召回。
+
+### 记忆迁移与负反馈（1.1.0）
+
+```bash
+# 换机迁移 / 备份
+python scripts/mile_cli.py memory --action export --out memories.json               # 全量
+python scripts/mile_cli.py memory --action export --out memories.json --project 科技 # 按项目
+python scripts/mile_cli.py memory --action import --source memories.json            # merge，按 id 去重
+python scripts/mile_cli.py memory --action import --source memories.json --mode replace  # 清空后导入（自动备份原库）
+
+# 负反馈：被拒绝的修改在召回中自动降权
+python scripts/mile_cli.py memory --action feedback --id <记忆id> --outcome rejected
+python scripts/mile_cli.py memory --action feedback --id <记忆id> --outcome accepted
+```
+
+### 批量变体（1.1.0）
+
+```bash
+# 一条底稿 + 参数池 → N 份差异草稿（_v1.._vN），每份独立 qa 与记忆
+python scripts/mile_cli.py variants --project 产品介绍 素材.mp4 \
+  --count 4 \
+  --openings 开场A.mp4,开场B.mp4 \
+  --transitions 叠化,闪白,放大 \
+  --bgms BGM1.mp3,BGM2.mp3 \
+  --ratios 16:9,9:16 \
+  --clip-duration 3s        # ffprobe 缺失时的兜底
+```
+
+> 变体之间保证至少一个参数不同（无显式命名时要求参数池含 ≥2 个选项）；单份失败不影响其他变体。
+
 ### 智能组装
 
 ```bash
@@ -191,14 +255,15 @@ mile-jianying-skill/
 ├── prompts/              # 提示词模板
 ├── scripts/
 │   ├── mile_cli.py       # 统一命令行（推荐入口）
-│   ├── mile/             # 确定性编辑核心：timecode/draft/timeline/ops/plan/memory/quality/assemble
+│   ├── mile/             # 确定性编辑核心：timecode/draft/timeline/ops/plan/quality/assemble
 │   │                     # 智能层：intent（中文意图）/ subtitles（字幕整理）/ recommend（推荐）/ smart（编排）
+│   │                     # v1.1：preview（差异预览）/ profile（风格档案）/ variants（批量变体）
 │   ├── jy_wrapper.py     # 高层 JyProject API
 │   ├── draft_inspector.py / auto_exporter.py / asset_search.py ...
 │   └── vendor/           # 内置 pyJianYingDraft（MIT，见 THIRD_PARTY_NOTICES.md）
 ├── tools/                # 录屏等桌面工具
 ├── data/                 # 云端音乐/文字样式库
-└── tests/                # 单元测试（python -m pytest tests）
+└── tests/                # 单元测试（python -m unittest discover -s tests 或 pytest tests）
 ```
 
 ## 文档
@@ -213,6 +278,7 @@ mile-jianying-skill/
 - [docs/real-jianying-5.9-e2e-report.md](docs/real-jianying-5.9-e2e-report.md) — 真实剪映 5.9 端到端实测报告（问题清单与维度评分）
 - [docs/user-pain-points.md](docs/user-pain-points.md) — AI 剪辑需求与痛点总结
 - [docs/improvement-plan.md](docs/improvement-plan.md) — 功能完善规划与路线图
+- [docs/dev-requirement-v1.1.md](docs/dev-requirement-v1.1.md) — v1.1 策划开发需求文档（PRD：差异预览/风格档案/记忆治理/批量变体）
 - [CHANGELOG.md](CHANGELOG.md) — 版本变更记录
 
 ## 相关链接

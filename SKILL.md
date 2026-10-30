@@ -1,7 +1,7 @@
 ---
 name: mile-jianying-skill
-description: 米乐-自动剪映视频。面向剪映专业版的自然语言自动剪辑 Skill：草稿时间线理解、片段级精准编辑、结构化剪辑计划、剪辑记忆与风格复用、质量检查、素材/TTS/字幕/配乐/特效/录屏与导出。
-version: 1.0.0
+description: 米乐-自动剪映视频。面向剪映专业版的自然语言自动剪辑 Skill：草稿时间线理解、片段级精准编辑、修改前差异预览、结构化剪辑计划、系列风格档案、剪辑记忆与迁移、批量变体、质量检查、素材/TTS/字幕/配乐/特效/录屏与导出。
+version: 1.1.0
 metadata:
   openclaw:
     requires:
@@ -35,6 +35,10 @@ metadata:
 | 用户意图 | 命令 |
 |----------|------|
 | 用一句话描述剪辑需求 | `mile_cli.py smart "<草稿>" "中文指令"`（默认预览，确认后加 `--apply`） |
+| **改之前先看会变成什么样** | `mile_cli.py plan "<草稿>" --plan plan.json --preview` / `apply ... --preview`（内存执行，不落盘） |
+| **建立/套用系列风格档案** | `mile_cli.py profile --action create --name <档案> --draft <参考草稿>`；`assemble --style-from` 或 `profile --action export` 引用 |
+| **换机迁移记忆 / 负反馈** | `mile_cli.py memory --action export --out mem.json` / `import --source mem.json`；`feedback --outcome rejected/accepted` |
+| **一条底稿批量出变体** | `mile_cli.py variants --project 底稿 素材... --count N --openings ... --transitions ... --ratios ...` |
 | 字幕有错别字 / 字幕太长要断句 | `mile_cli.py subtitles "<草稿>" --split-max 8` → `--apply` |
 | 该配什么音乐 / 要不要加转场 | `mile_cli.py recommend "<草稿>" [--bgm|--transitions|--audio 素材]` |
 | 先看证据再给建议（只读） | `mile_cli.py analyze "<草稿>" [--media 素材 --scenes]` → `mile_cli.py decide "<草稿>" --intent "..."`（可 `--plan-out` 导出候选计划） |
@@ -140,10 +144,14 @@ python <SKILL_ROOT>/scripts/mile_cli.py memory --action recall \
 
 ```bash
 python <SKILL_ROOT>/scripts/mile_cli.py memory --action feedback --id <id> --rating 5
+python <SKILL_ROOT>/scripts/mile_cli.py memory --action feedback --id <id> --outcome accepted   # 1.1.0：正向强化
+python <SKILL_ROOT>/scripts/mile_cli.py memory --action feedback --id <id> --outcome rejected  # 1.1.0：召回自动降权
 ```
 
 - 记忆目录默认在用户配置目录，可用 `MILE_MEMORY_DIR` 覆盖；`--no-remember` 可关闭单次记录。
 - `assemble` 默认读取历史风格；可用 `--style-from` / `--style` / `--no-memory-style` 控制。
+- **迁移/备份**（1.1.0）：`memory --action export --out memories.json [--project X --since 2026-01-01]` 导出 JSON 包；`memory --action import --source memories.json [--mode merge|replace --overwrite]` 合并回收；`replace` 导入前自动备份原库，损坏文件拒绝导入（`IMPORT_BAD_FORMAT`）。
+- **系列风格档案**（1.1.0）：`profile --action create --name <档案> --draft <参考草稿>` 把一组风格（字幕字号/颜色/位置、转场、BGM 音量、节奏、画布）固化成命名档案，存放于 `MILE_MEMORY_DIR/profiles/`；同名创建默认拒绝（`PROFILE_EXISTS`），`--force` 覆盖时版本自增并保留旧版备份；支持 `list/show/update/delete/export/import`，便于团队共享与换机迁移。
 
 ## 📋 结构化计划（plan / apply）
 

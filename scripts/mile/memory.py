@@ -39,6 +39,8 @@ __all__ = [
     "forget",
     "update_feedback",
     "stats",
+    "export_memory",
+    "import_memory",
 ]
 
 _LOCK = threading.Lock()
@@ -645,6 +647,11 @@ def recommend_style(
         rating = record.get("rating")
         if isinstance(rating, (int, float)):
             score += max(-0.05, min(0.05, (float(rating) - 3) * 0.02))
+        outcome = str(record.get("outcome") or "").lower()
+        if outcome == "rejected":
+            score *= 0.5
+        elif outcome == "accepted":
+            score *= 1.1
         scored.append((score, text_score, struct_score, style_score, recency, record))
 
     scored.sort(key=lambda item: item[0], reverse=True)
@@ -779,4 +786,124 @@ def stats() -> dict:
         "last_at": last,
         "dir": str(memory_dir()),
         "size_bytes": _records_path().stat().st_size if _records_path().exists() else 0,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 记忆治理：导出 / 导入
+# ---------------------------------------------------------------------------
+
+_MEMORY_EXPORT_VERSION = 1
+_MAX_IMPORT_BYTES = 100 * 1024 * 1024  # 100 MB 上限
+
+
+def export_memory(
+    out: str | os.PathLike,
+    *,
+    project: Optional[str] = None,
+    since: Optional[str] = None,
+) -> dict:
+    """把记忆导出为 JSON 包，支持按项目 / 起始时间过滤，用于备份与换机迁移。
+
+    导出内容包含记忆原文（intent / notes 等），属于用户个人数据；请按项目与
+    时间范围控制导出面，不要在含敏感信息的共享链路中传播。
+    """
+    records = _load_records()
+    if project:
+        needle = str(project).lower()
+        records = [item for item in records if needle in str(item.get("project") or "").lower()]
+    if since:
+        since_dt = _parse_time(since)
+        records = [item for item in records if _parse_time(item.get("created_at", "")) >= since_dt]
+    payload = {
+        "kind": "mile-memory",
+        "version": _MEMORY_EXPORT_VERSION,
+        "exported_at": _now(),
+        "count": len(records),
+        "records": records,
+    }
+    path = Path(str(out)).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
+    try:
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception as exc:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise MileError("EXPORT_FAILED", f"写入导出文件失败: {exc}") from exc
+    return {"exported": len(records), "path": str(path)}
+
+
+def import_memory(
+    source: str | os.PathLike,
+    *,
+    mode: str = "merge",
+    overwrite: bool = False,
+) -> dict:
+    """从 JSON 包导入记忆。
+
+    - mode=``merge``（默认）：按 id 去重，已存在的默认跳过，``overwrite=True`` 时更新；
+    - mode=``replace``：清空现有记忆后导入（导入前自动备份原文件）。
+
+    先完整校验文件再写入，损坏的 JSON 不会污染现有记忆库。
+    """
+    path = Path(str(source)).expanduser()
+    if not path.exists():
+        raise MileError("IMPORT_FAILED", f"导入文件不存在: {path}")
+    if path.stat().st_size > _MAX_IMPORT_BYTES:
+        raise MileError("IMPORT_FAILED", f"导入文件超过大小上限（{_MAX_IMPORT_BYTES // (1024 * 1024)}MB）")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise MileError("IMPORT_BAD_FORMAT", f"导入文件不是合法 JSON: {exc}") from exc
+    if not isinstance(payload, dict) or payload.get("kind") != "mile-memory":
+        raise MileError("IMPORT_BAD_FORMAT", "导入文件缺少 mile-memory 标记，拒绝导入")
+    records = payload.get("records")
+    if not isinstance(records, list):
+        raise MileError("IMPORT_BAD_FORMAT", "导入文件 records 字段必须是数组")
+
+    mode = str(mode or "merge").lower()
+    if mode not in {"merge", "replace"}:
+        raise MileError("IMPORT_BAD_FORMAT", f"mode 必须是 merge 或 replace，当前为: {mode}")
+
+    if mode == "replace":
+        backup = _records_path()
+        if backup.exists():
+            backup_path = path.with_name("sessions.backup-" + _now().replace(":", "-") + ".jsonl")
+            backup_path.write_text(backup.read_text(encoding="utf-8"), encoding="utf-8")
+        else:
+            backup_path = None
+
+    with _LOCK:
+        existing = _load_records() if mode == "merge" else []
+        seen = {item.get("id") for item in existing}
+        added, updated, skipped = 0, 0, 0
+        for item in records:
+            if not isinstance(item, dict) or not item.get("id"):
+                skipped += 1
+                continue
+            if item["id"] in seen:
+                if overwrite:
+                    for i, cur in enumerate(existing):
+                        if cur.get("id") == item["id"]:
+                            existing[i] = item
+                            updated += 1
+                            break
+                else:
+                    skipped += 1
+                continue
+            existing.append(item)
+            seen.add(item["id"])
+            added += 1
+        existing = existing[-_MAX_RECORDS:]
+        _write_records(existing)
+    return {
+        "mode": mode,
+        "added": added,
+        "updated": updated,
+        "skipped": skipped,
+        "backup": str(backup_path) if mode == "replace" and backup_path else None,
     }

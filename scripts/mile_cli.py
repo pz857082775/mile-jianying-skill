@@ -29,6 +29,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from mile import __version__  # noqa: E402
 from mile import memory as memory_mod  # noqa: E402
+from mile import profile as profile_mod  # noqa: E402
 from mile import quality as quality_mod  # noqa: E402
 from mile.assemble import assemble  # noqa: E402
 from mile.draft import (  # noqa: E402
@@ -41,6 +42,7 @@ from mile.draft import (  # noqa: E402
 )
 from mile.errors import MileError  # noqa: E402
 from mile.plan import apply_plan, compile_plan  # noqa: E402
+from mile.preview import preview_plan  # noqa: E402
 from mile.recommend import analyze_audio, rank_bgm, recommend_transitions  # noqa: E402
 from mile.smart import run_smart, run_subtitles  # noqa: E402
 from mile.subtitles import asr_available  # noqa: E402
@@ -323,6 +325,11 @@ def _record_memory(args, draft: Draft, outcome: str, *, default_intent: str) -> 
 def cmd_plan(args) -> dict:
     draft = _load(args)
     payload = _load_json_arg(args.plan, "计划")
+    if getattr(args, "preview", False):
+        result = preview_plan(draft.data, payload)
+        result["draft"] = draft.name
+        result["folder"] = str(draft.folder)
+        return result
     result = apply_plan(draft, payload, dry_run=True)
     result["draft"] = draft.name
     result["folder"] = str(draft.folder)
@@ -332,6 +339,11 @@ def cmd_plan(args) -> dict:
 def cmd_apply(args) -> dict:
     draft = _load(args)
     payload = _load_json_arg(args.plan, "计划")
+    if getattr(args, "preview", False):
+        result = preview_plan(draft.data, payload)
+        result["draft"] = draft.name
+        result["folder"] = str(draft.folder)
+        return result
     result = apply_plan(draft, payload, dry_run=args.dry_run, backup=not args.no_backup)
     if not args.dry_run:
         record = _record_memory(args, draft, "applied", default_intent="按计划自动编辑草稿")
@@ -426,7 +438,82 @@ def cmd_memory(args) -> dict:
         )
     if action == "stats":
         return memory_mod.stats()
+    if action == "export":
+        return memory_mod.export_memory(
+            args.out,
+            project=args.project,
+            since=args.since,
+        )
+    if action == "import":
+        return memory_mod.import_memory(
+            args.source,
+            mode=args.mode,
+            overwrite=args.overwrite,
+        )
     raise MileError("BAD_ARGS", f"未知的 memory 动作: {action}")
+
+
+def cmd_variants(args) -> dict:
+    from mile.variants import variants as variants_run
+
+    style = _load_json_arg(args.style, "样式") if args.style else None
+    return variants_run(
+        args.project,
+        args.clips,
+        root=args.root,
+        width=args.width,
+        height=args.height,
+        fps=args.fps,
+        count=args.count,
+        names=_tags(args.projects),
+        openings=_tags(args.openings),
+        transitions=_tags(args.transitions),
+        bgms=_tags(args.bgms),
+        ratios=_tags(args.ratios),
+        captions=args.captions,
+        bgm_volume=args.bgm_volume,
+        clip_duration=args.clip_duration,
+        transition_duration=args.transition_duration,
+        style=style,
+        remember=not args.no_remember,
+        intent=args.intent,
+        tags=_tags(args.tags),
+        notes=args.notes,
+        force=args.allow_replace,
+        dry_run=args.dry_run,
+    )
+
+
+def cmd_profile(args) -> dict:
+    action = args.action
+    if action == "create":
+        return profile_mod.create_profile(
+            args.name,
+            draft_path=args.draft,
+            style=json.loads(args.style) if args.style else None,
+            tags=_tags(args.tags),
+            notes=args.notes,
+            force=args.force,
+        )
+    if action == "list":
+        return {"count": len(profile_mod.list_profiles()), "profiles": profile_mod.list_profiles()}
+    if action == "show":
+        return profile_mod.get_profile(args.name)
+    if action == "update":
+        return profile_mod.update_profile(
+            args.name,
+            style=json.loads(args.style) if args.style else None,
+            tags=_tags(args.tags),
+            notes=args.notes,
+            draft_path=args.draft,
+        )
+    if action == "delete":
+        return profile_mod.delete_profile(args.name)
+    if action == "export":
+        return profile_mod.export_profile(args.name, args.out)
+    if action == "import":
+        return profile_mod.import_profile(args.source, force=args.force)
+    raise MileError("BAD_ARGS", f"未知的 profile 动作: {action}")
 
 
 def cmd_srt(args) -> dict:
@@ -748,10 +835,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     plan = _draft_parser(subparsers, "plan", "校验剪辑计划（不保存）", cmd_plan)
     plan.add_argument("--plan", required=True, help="计划 JSON 文件路径，或 '-' 从 stdin 读取")
+    plan.add_argument("--preview", action="store_true", help="输出内存执行后的差异预览（不落盘）")
 
     apply = _draft_parser(subparsers, "apply", "应用剪辑计划", cmd_apply)
     apply.add_argument("--plan", required=True, help="计划 JSON 文件路径，或 '-' 从 stdin 读取")
     apply.add_argument("--dry-run", action="store_true")
+    apply.add_argument("--preview", action="store_true", help="只输出差异预览，不落盘")
     apply.add_argument("--no-backup", action="store_true")
     _memory_write_args(apply)
 
@@ -850,12 +939,35 @@ def build_parser() -> argparse.ArgumentParser:
     _common(assemble_parser)
     assemble_parser.set_defaults(func=cmd_assemble)
 
-    memory = subparsers.add_parser("memory", help="查看/召回/反馈剪辑记忆")
-    memory.add_argument("--action", required=True, choices=["list", "recall", "show", "forget", "feedback", "stats"])
+    variants_parser = subparsers.add_parser("variants", help="批量生成差异草稿（矩阵号/多平台/A-B 测试）")
+    variants_parser.add_argument("--project", required=True, help="底稿名称；变体命名为 {project}_v1..vN")
+    variants_parser.add_argument("clips", nargs="+", help="视频/图片素材路径")
+    variants_parser.add_argument("--count", type=int, default=3, help="变体数量")
+    variants_parser.add_argument("--projects", help="显式变体命名，逗号分隔（数量需与变体数匹配）")
+    variants_parser.add_argument("--openings", help="开头素材池，逗号分隔")
+    variants_parser.add_argument("--transitions", help="转场池，逗号分隔")
+    variants_parser.add_argument("--bgms", help="BGM 池，逗号分隔")
+    variants_parser.add_argument("--ratios", help="画布比例池，逗号分隔（16:9/9:16/1:1/4:5/宽x高）")
+    variants_parser.add_argument("--width", type=int, default=1920)
+    variants_parser.add_argument("--height", type=int, default=1080)
+    variants_parser.add_argument("--fps", type=int, default=30)
+    variants_parser.add_argument("--captions", help="SRT/JSON/TXT 字幕文件")
+    variants_parser.add_argument("--bgm-volume", type=float, default=0.25)
+    variants_parser.add_argument("--clip-duration", help="所有素材统一入片时长（ffprobe 缺失时兜底）")
+    variants_parser.add_argument("--transition-duration", help="转场时长，如 0.5s")
+    variants_parser.add_argument("--style", help="样式 JSON 文件或内联 JSON")
+    variants_parser.add_argument("--allow-replace", action="store_true")
+    variants_parser.add_argument("--dry-run", action="store_true")
+    _memory_write_args(variants_parser)
+    _common(variants_parser)
+    variants_parser.set_defaults(func=cmd_variants)
+
+    memory = subparsers.add_parser("memory", help="查看/召回/反馈/迁移剪辑记忆")
+    memory.add_argument("--action", required=True, choices=["list", "recall", "show", "forget", "feedback", "stats", "export", "import"])
     memory.add_argument("--id", help="记忆 id")
     memory.add_argument("--query", help="文本检索")
     memory.add_argument("--tag", action="append", help="标签过滤，可重复")
-    memory.add_argument("--project", help="项目过滤")
+    memory.add_argument("--project", help="项目过滤（export 时按项目导出）")
     memory.add_argument("--draft", help="recall 时参考的草稿")
     memory.add_argument("--intent", help="recall 时的需求描述")
     memory.add_argument("--tags", help="recall 时的标签，逗号分隔")
@@ -864,8 +976,26 @@ def build_parser() -> argparse.ArgumentParser:
     memory.add_argument("--rating", type=float)
     memory.add_argument("--outcome")
     memory.add_argument("--notes")
+    memory.add_argument("--out", help="export 的输出文件路径")
+    memory.add_argument("--source", help="import 的源文件路径")
+    memory.add_argument("--mode", default="merge", choices=["merge", "replace"], help="import 模式")
+    memory.add_argument("--since", help="export 起始时间，如 2026-01-01")
+    memory.add_argument("--overwrite", action="store_true", help="import 时覆盖已存在的同 id 记忆")
     _common(memory)
     memory.set_defaults(func=cmd_memory)
+
+    profile = subparsers.add_parser("profile", help="系列风格档案管理")
+    profile.add_argument("--action", required=True, choices=["create", "list", "show", "update", "delete", "export", "import"])
+    profile.add_argument("--name", help="档案名")
+    profile.add_argument("--draft", help="参考草稿（create/update 时提取风格）")
+    profile.add_argument("--style", help="显式风格 JSON（覆盖草稿提取结果）")
+    profile.add_argument("--tags", help="标签，逗号分隔")
+    profile.add_argument("--notes", help="备注")
+    profile.add_argument("--force", action="store_true", help="允许覆盖同名档案")
+    profile.add_argument("--out", help="export 的输出文件路径")
+    profile.add_argument("--source", help="import 的源文件路径")
+    _common(profile)
+    profile.set_defaults(func=cmd_profile)
 
     return parser
 
